@@ -1,0 +1,12 @@
+{
+  "name": "standards-review-textract-lambda",
+  "version": "1.0.0",
+  "description": "Lambda function to extract text from PDFs using AWS Textract",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1001.0"
+  }
+}
