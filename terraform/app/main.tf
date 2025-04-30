@@ -203,7 +203,7 @@ resource "aws_lambda_function" "textract_lambda" {
   filename      = "${path.module}/../lambdas/textract-lambda.zip"
   source_code_hash = filebase64sha256("${path.module}/../lambdas/textract-lambda.zip")
   handler       = "index.handler"
-  runtime       = "nodejs16.x"
+  runtime       = "nodejs18.x"
   timeout       = 30
   role          = aws_iam_role.textract_lambda_role.arn
   
@@ -231,7 +231,7 @@ resource "aws_lambda_function" "textract_completion_lambda" {
   filename      = "${path.module}/../lambdas/textract-lambda.zip"
   source_code_hash = filebase64sha256("${path.module}/../lambdas/textract-lambda.zip")
   handler       = "completion-handler.handler"
-  runtime       = "nodejs16.x"
+  runtime       = "nodejs18.x"
   timeout       = 120
   role          = aws_iam_role.textract_lambda_role.arn
   
@@ -363,6 +363,16 @@ resource "aws_iam_policy" "chunking_lambda_policy" {
           "${aws_s3_bucket.chunks_destination.arn}",
           "${aws_s3_bucket.chunks_destination.arn}/*"
         ]
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "bedrock:InvokeModel"
+        ],
+        Resource = [
+          "arn:aws:bedrock:eu-west-2::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
+          "arn:aws:bedrock:eu-west-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+        ]
       }
     ]
   })
@@ -385,14 +395,15 @@ resource "aws_lambda_function" "chunking_lambda" {
   filename      = "${path.module}/../lambdas/chunking-lambda.zip"
   source_code_hash = filebase64sha256("${path.module}/../lambdas/chunking-lambda.zip")
   handler       = "index.handler"
-  runtime       = "nodejs16.x"
+  runtime       = "nodejs18.x"
   timeout       = 60  # Allow up to 1 minute for processing large files
   memory_size   = 256 # Allocate more memory for text processing
   role          = aws_iam_role.chunking_lambda_role.arn
   
   environment {
     variables = {
-      CHUNKS_BUCKET = aws_s3_bucket.chunks_destination.bucket
+      CHUNKS_BUCKET = aws_s3_bucket.chunks_destination.bucket,
+      BEDROCK_MODEL_ID = "anthropic.claude-3-sonnet-20240229-v1:0"
     }
   }
 
