@@ -7,21 +7,37 @@ const DESTINATION_BUCKET = process.env.DESTINATION_BUCKET;
 
 exports.handler = async (event) => {
   try {
+    // Debug: Log the entire event
+    console.log('Received event:', JSON.stringify(event, null, 2));
+    
+    // Debug environment variables
+    console.log("ENV DESTINATION_BUCKET:", process.env.DESTINATION_BUCKET);
+    console.log("ENV SNS_TOPIC_ARN:", process.env.SNS_TOPIC_ARN);
+    console.log("ENV TEXTRACT_ROLE_ARN:", process.env.TEXTRACT_ROLE_ARN);
+
     // Get the S3 bucket and key from the event
     const sourceBucket = event.Records[0].s3.bucket.name;
     const sourceKey = decodeURIComponent(event.Records[0].s3.object.key.replace(/\+/g, ' '));
     
     console.log(`Processing file: s3://${sourceBucket}/${sourceKey}`);
     
-    // Validate that the key has a top-level directory but no subdirectories
+    // Extract the directory structure and filename
     const keyParts = sourceKey.split('/');
     
-    if (keyParts.length !== 2) {
-      throw new Error('Invalid file path. Files must be stored in a top-level directory with no subdirectories. Example: nist/document.pdf');
+    // Handle files in root, single directory, or nested directories
+    let standardType = 'default';
+    let fileName = '';
+    
+    if (keyParts.length === 1) {
+      // File is in the root of the bucket
+      fileName = keyParts[0];
+    } else {
+      // File is in a directory
+      fileName = keyParts.pop(); // Get the last part (the filename)
+      standardType = keyParts[0]; // Use the first directory as the standard type
     }
     
-    const standardType = keyParts[0]; // e.g., 'sans', 'nist', 'ncsc'
-    const fileName = keyParts[1];
+    console.log(`Processing file with standardType: ${standardType}, fileName: ${fileName}`);
     
     // Validate it's a PDF file
     if (!fileName.toLowerCase().endsWith('.pdf')) {
@@ -36,18 +52,34 @@ exports.handler = async (event) => {
           Name: sourceKey
         }
       },
-      OutputConfig: {
-        S3Bucket: DESTINATION_BUCKET,
-        S3Prefix: `${standardType}/textract-output/`
-      },
-      FeatureTypes: ['TABLES', 'FORMS']
+      FeatureTypes: ['TABLES', 'FORMS'],
+      NotificationChannel: {
+        SNSTopicArn: process.env.SNS_TOPIC_ARN,
+        RoleArn: process.env.TEXTRACT_ROLE_ARN
+      }
     };
+    
+    // Log parameters for debugging
+    console.log("Textract parameters:", JSON.stringify(params, null, 2));
+    
+    // Log environment variables for debugging
+    console.log('TEXTRACT_ROLE_ARN value:', JSON.stringify(process.env.TEXTRACT_ROLE_ARN));
+    console.log('SNS_TOPIC_ARN value:', JSON.stringify(process.env.SNS_TOPIC_ARN));
+    
+    // Check if we have all required environment variables (checking for null, undefined, or empty string)
+    if (!process.env.TEXTRACT_ROLE_ARN || process.env.TEXTRACT_ROLE_ARN.trim() === '' || 
+        !process.env.SNS_TOPIC_ARN || process.env.SNS_TOPIC_ARN.trim() === '') {
+      console.warn('TEXTRACT_ROLE_ARN or SNS_TOPIC_ARN missing or empty – running without notifications');
+      delete params.NotificationChannel;
+      delete params.OutputConfig;
+    }
     
     // Start the async Textract job
     const textractResponse = await textract.startDocumentAnalysis(params).promise();
     console.log(`Started Textract job: ${textractResponse.JobId}`);
     
     // Create a destination filename for the extracted text
+    // Use the same path structure as the input but with .txt extension
     const textFileName = fileName.replace(/\.pdf$/i, '.txt');
     const destinationKey = `${standardType}/${textFileName}`;
     

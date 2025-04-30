@@ -61,3 +61,7 @@ build/
 out/
 coverage/
 .nyc_output/
+
+# Lambda zips
+*.zip
+terraform/lambdas/
