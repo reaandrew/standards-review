@@ -438,6 +438,149 @@ resource "aws_s3_bucket_notification" "text_upload_notification" {
   ]
 }
 
+# Bucket for storing embeddings
+resource "aws_s3_bucket" "embeddings_destination" {
+  bucket = "poc-standards-review-embeddings-destination"
+}
+
+resource "aws_s3_bucket_ownership_controls" "embeddings_destination" {
+  bucket = aws_s3_bucket.embeddings_destination.id
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}
+
+resource "aws_s3_bucket_acl" "embeddings_destination" {
+  depends_on = [aws_s3_bucket_ownership_controls.embeddings_destination]
+  bucket = aws_s3_bucket.embeddings_destination.id
+  acl    = "private"
+}
+
+# IAM role for the embeddings Lambda function
+resource "aws_iam_role" "embeddings_lambda_role" {
+  name = "poc-standards-review-embeddings-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Action = "sts:AssumeRole",
+      Effect = "Allow",
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
+# Policy for embeddings Lambda
+resource "aws_iam_policy" "embeddings_lambda_policy" {
+  name        = "poc-standards-review-embeddings-lambda-policy"
+  description = "Policy for embeddings Lambda function"
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "s3:GetObject"
+        ],
+        Resource = "${aws_s3_bucket.chunks_destination.arn}/*"
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ],
+        Resource = [
+          "${aws_s3_bucket.embeddings_destination.arn}",
+          "${aws_s3_bucket.embeddings_destination.arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "bedrock:InvokeModel"
+        ],
+        Resource = [
+          "arn:aws:bedrock:eu-west-2::foundation-model/amazon.titan-embed-text-v2:0"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "embeddings_lambda_policy_attachment" {
+  role       = aws_iam_role.embeddings_lambda_role.name
+  policy_arn = aws_iam_policy.embeddings_lambda_policy.arn
+}
+
+# Basic Lambda execution policy
+resource "aws_iam_role_policy_attachment" "embeddings_lambda_basic_execution" {
+  role       = aws_iam_role.embeddings_lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Lambda function for generating embeddings from chunks
+resource "aws_lambda_function" "embeddings_lambda" {
+  function_name = "poc-standards-review-embeddings-lambda"
+  filename      = "${path.module}/../lambdas/embeddings-lambda.zip"
+  source_code_hash = filebase64sha256("${path.module}/../lambdas/embeddings-lambda.zip")
+  handler       = "index.handler"
+  runtime       = "nodejs18.x"
+  timeout       = 60  # Allow up to 1 minute for processing embeddings
+  memory_size   = 512 # Sufficient memory for embedding generation
+  role          = aws_iam_role.embeddings_lambda_role.arn
+  
+  environment {
+    variables = {
+      EMBEDDINGS_BUCKET = aws_s3_bucket.embeddings_destination.bucket,
+      EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.embeddings_lambda_basic_execution,
+    aws_iam_role_policy_attachment.embeddings_lambda_policy_attachment
+  ]
+}
+
+# Permission for S3 to invoke the Lambda
+resource "aws_lambda_permission" "allow_chunks_bucket" {
+  statement_id  = "AllowExecutionFromS3ForEmbeddingsLambda"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.embeddings_lambda.function_name
+  principal     = "s3.amazonaws.com"
+  source_arn    = aws_s3_bucket.chunks_destination.arn
+}
+
+# S3 event notification to trigger the Lambda when a chunk file is uploaded
+resource "aws_s3_bucket_notification" "chunks_upload_notification" {
+  bucket = aws_s3_bucket.chunks_destination.id
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.embeddings_lambda.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_suffix       = ".json"
+  }
+
+  depends_on = [
+    aws_lambda_permission.allow_chunks_bucket,
+    aws_s3_bucket.chunks_destination
+  ]
+}
+
 # Output the Textract Service Role ARN for verification
 output "textract_service_role_arn" {
   value = aws_iam_role.textract_service_role.arn

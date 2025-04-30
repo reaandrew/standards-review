@@ -33,9 +33,12 @@ package-lambda: clean-lambda
 	cd $(LAMBDA_DIR)/textract-lambda && zip -r ../textract-lambda.zip index.js completion-handler.js package.json node_modules
 	cd $(LAMBDA_DIR)/chunking-lambda && npm install --production
 	cd $(LAMBDA_DIR)/chunking-lambda && zip -r ../chunking-lambda.zip index.js package.json node_modules
+	cd $(LAMBDA_DIR)/embeddings-lambda && npm install --production
+	cd $(LAMBDA_DIR)/embeddings-lambda && zip -r ../embeddings-lambda.zip index.js package.json node_modules
 	mkdir -p terraform/lambdas
 	cp $(LAMBDA_DIR)/textract-lambda.zip terraform/lambdas/
 	cp $(LAMBDA_DIR)/chunking-lambda.zip terraform/lambdas/
+	cp $(LAMBDA_DIR)/embeddings-lambda.zip terraform/lambdas/
 
 # Deploy app (after packaging lambda)
 deploy-app: package-lambda
