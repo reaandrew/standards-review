@@ -581,8 +581,278 @@ resource "aws_s3_bucket_notification" "chunks_upload_notification" {
   ]
 }
 
+# OpenSearch Domain
+resource "aws_opensearch_domain" "semantic_search" {
+  domain_name    = "poc-standards-review-search"
+  engine_version = "OpenSearch_2.5"
+
+  cluster_config {
+    instance_type  = "t3.small.search"
+    instance_count = 1
+  }
+
+  ebs_options {
+    ebs_enabled = true
+    volume_size = 10
+  }
+
+  advanced_security_options {
+    enabled                        = false
+    internal_user_database_enabled = false
+  }
+
+  node_to_node_encryption {
+    enabled = true
+  }
+
+  encrypt_at_rest {
+    enabled = true
+  }
+
+  domain_endpoint_options {
+    enforce_https       = true
+    tls_security_policy = "Policy-Min-TLS-1-2-2019-07"
+  }
+
+  access_policies = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = {
+          AWS = "*"
+        }
+        Action    = "es:*"
+        Resource  = "arn:aws:es:eu-west-2:*:domain/poc-standards-review-search/*"
+      }
+    ]
+  })
+
+  tags = {
+    Domain = "poc-standards-review-search"
+  }
+}
+
+# IAM role for the OpenSearch Lambda function
+resource "aws_iam_role" "opensearch_lambda_role" {
+  name = "poc-standards-review-opensearch-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Action = "sts:AssumeRole",
+      Effect = "Allow",
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
+# Policy for OpenSearch Lambda
+resource "aws_iam_policy" "opensearch_lambda_policy" {
+  name        = "poc-standards-review-opensearch-lambda-policy"
+  description = "Policy for OpenSearch Lambda function"
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ],
+        Resource = [
+          "${aws_s3_bucket.embeddings_destination.arn}",
+          "${aws_s3_bucket.embeddings_destination.arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "es:ESHttpPut",
+          "es:ESHttpPost",
+          "es:ESHttpGet",
+          "es:ESHttpDelete"
+        ],
+        Resource = [
+          "${aws_opensearch_domain.semantic_search.arn}",
+          "${aws_opensearch_domain.semantic_search.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "opensearch_lambda_policy_attachment" {
+  role       = aws_iam_role.opensearch_lambda_role.name
+  policy_arn = aws_iam_policy.opensearch_lambda_policy.arn
+}
+
+# Basic Lambda execution policy
+resource "aws_iam_role_policy_attachment" "opensearch_lambda_basic_execution" {
+  role       = aws_iam_role.opensearch_lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Lambda function for inserting embeddings into OpenSearch
+resource "aws_lambda_function" "opensearch_lambda" {
+  function_name = "poc-standards-review-opensearch-lambda"
+  filename      = "${path.module}/../lambdas/opensearch-lambda.zip"
+  source_code_hash = filebase64sha256("${path.module}/../lambdas/opensearch-lambda.zip")
+  handler       = "index.handler"
+  runtime       = "nodejs18.x"
+  timeout       = 60  # Allow up to 1 minute for processing
+  memory_size   = 512 # Sufficient memory for OpenSearch operations
+  role          = aws_iam_role.opensearch_lambda_role.arn
+  
+  environment {
+    variables = {
+      OPENSEARCH_ENDPOINT = "https://${aws_opensearch_domain.semantic_search.endpoint}"
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.opensearch_lambda_basic_execution,
+    aws_iam_role_policy_attachment.opensearch_lambda_policy_attachment,
+    aws_opensearch_domain.semantic_search
+  ]
+}
+
+# Permission for S3 to invoke the Lambda
+resource "aws_lambda_permission" "allow_embeddings_bucket" {
+  statement_id  = "AllowExecutionFromS3ForOpenSearchLambda"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.opensearch_lambda.function_name
+  principal     = "s3.amazonaws.com"
+  source_arn    = aws_s3_bucket.embeddings_destination.arn
+}
+
+# S3 event notification to trigger the Lambda when an embedding file is uploaded
+resource "aws_s3_bucket_notification" "embeddings_upload_notification" {
+  bucket = aws_s3_bucket.embeddings_destination.id
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.opensearch_lambda.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_suffix       = ".json"
+  }
+
+  depends_on = [
+    aws_lambda_permission.allow_embeddings_bucket,
+    aws_s3_bucket.embeddings_destination
+  ]
+}
+
 # Output the Textract Service Role ARN for verification
 output "textract_service_role_arn" {
   value = aws_iam_role.textract_service_role.arn
   description = "ARN of the IAM role for Textract to publish to SNS"
+}
+
+# Search Lambda Function
+resource "aws_iam_role" "search_lambda_role" {
+  name = "poc-standards-review-search-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Action = "sts:AssumeRole",
+      Effect = "Allow",
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_policy" "search_lambda_policy" {
+  name        = "poc-standards-review-search-lambda-policy"
+  description = "Policy for search Lambda function"
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "es:ESHttpGet",
+          "es:ESHttpPost",
+          "es:ESHttpPut",
+          "es:ESHttpDelete"
+        ],
+        Resource = [
+          "${aws_opensearch_domain.semantic_search.arn}",
+          "${aws_opensearch_domain.semantic_search.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "search_lambda_policy_attachment" {
+  role       = aws_iam_role.search_lambda_role.name
+  policy_arn = aws_iam_policy.search_lambda_policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "search_lambda_basic_execution" {
+  role       = aws_iam_role.search_lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_lambda_function" "search_lambda" {
+  function_name = "poc-standards-review-search-lambda"
+  filename      = "${path.module}/../lambdas/search-lambda.zip"
+  source_code_hash = filebase64sha256("${path.module}/../lambdas/search-lambda.zip")
+  handler       = "index.handler"
+  runtime       = "nodejs18.x"
+  timeout       = 30
+  memory_size   = 256
+  role          = aws_iam_role.search_lambda_role.arn
+  
+  environment {
+    variables = {
+      OPENSEARCH_ENDPOINT = "https://${aws_opensearch_domain.semantic_search.endpoint}",
+      DEFAULT_INDEX = "_all",
+      MAX_RESULTS = "50",
+      MIN_SCORE = "0.1"
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.search_lambda_basic_execution,
+    aws_iam_role_policy_attachment.search_lambda_policy_attachment,
+    aws_opensearch_domain.semantic_search
+  ]
+}
+
+# Output the OpenSearch domain endpoint
+output "opensearch_endpoint" {
+  value = aws_opensearch_domain.semantic_search.endpoint
+  description = "Endpoint of the OpenSearch domain for semantic search"
+}
+
+# Output the search lambda ARN
+output "search_lambda_arn" {
+  value = aws_lambda_function.search_lambda.arn
+  description = "ARN of the search Lambda function"
 }

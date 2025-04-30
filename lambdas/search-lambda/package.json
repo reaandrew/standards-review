@@ -1,0 +1,16 @@
+{
+  "name": "search-lambda",
+  "version": "1.0.0",
+  "description": "Lambda function for searching documents by taxonomy and text queries",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@opensearch-project/opensearch": "^1.2.0",
+    "aws-sdk": "^2.1454.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -35,10 +35,18 @@ package-lambda: clean-lambda
 	cd $(LAMBDA_DIR)/chunking-lambda && zip -r ../chunking-lambda.zip index.js package.json node_modules
 	cd $(LAMBDA_DIR)/embeddings-lambda && npm install --production
 	cd $(LAMBDA_DIR)/embeddings-lambda && zip -r ../embeddings-lambda.zip index.js package.json node_modules
+	cd $(LAMBDA_DIR)/opensearch-lambda && npm install --production
+	cd $(LAMBDA_DIR)/opensearch-lambda && zip -r ../opensearch-lambda.zip index.js package.json node_modules
+	mkdir -p $(LAMBDA_DIR)/search-lambda/node_modules
+	cp $(LAMBDA_DIR)/taxonomy.js $(LAMBDA_DIR)/search-lambda/
+	cd $(LAMBDA_DIR)/search-lambda && npm install --production
+	cd $(LAMBDA_DIR)/search-lambda && zip -r ../search-lambda.zip index.js package.json taxonomy.js node_modules
 	mkdir -p terraform/lambdas
 	cp $(LAMBDA_DIR)/textract-lambda.zip terraform/lambdas/
 	cp $(LAMBDA_DIR)/chunking-lambda.zip terraform/lambdas/
 	cp $(LAMBDA_DIR)/embeddings-lambda.zip terraform/lambdas/
+	cp $(LAMBDA_DIR)/opensearch-lambda.zip terraform/lambdas/
+	cp $(LAMBDA_DIR)/search-lambda.zip terraform/lambdas/
 
 # Deploy app (after packaging lambda)
 deploy-app: package-lambda

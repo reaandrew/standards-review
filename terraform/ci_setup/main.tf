@@ -1,19 +1,19 @@
 provider "aws" {
-  region = "us-east-1"
+  region = "eu-west-2"
 }
 
 terraform {
   backend "s3" {
-    bucket         = "standards-review-terraform-state"
+    bucket         = "poc-standards-review-terraform-state"
     key            = "ci-setup/terraform.tfstate"
-    region         = "us-east-1"
-    dynamodb_table = "standards-review-terraform-locks"
+    region         = "eu-west-2"
+    dynamodb_table = "poc-standards-review-terraform-locks"
     encrypt        = true
   }
 }
 
 resource "aws_iam_role" "ci_role" {
-  name = "standards-review-ci-role"
+  name = "poc-standards-review-ci-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -42,7 +42,7 @@ resource "aws_iam_role" "ci_role" {
 }
 
 resource "aws_iam_policy" "ci_policy" {
-  name        = "standards-review-ci-policy"
+  name        = "poc-standards-review-ci-policy"
   description = "IAM policy for CI terraform operations"
 
   policy = jsonencode({
@@ -52,14 +52,14 @@ resource "aws_iam_policy" "ci_policy" {
         Effect   = "Allow"
         Action   = "*"
         Resource = [
-          "arn:aws:s3:::standards-review-terraform-state*",
-          "arn:aws:s3:::standards-review-pdf-source*",
-          "arn:aws:s3:::standards-review-text-destination*",
-          "arn:aws:dynamodb:*:*:table/standards-review-terraform-locks",
-          "arn:aws:iam::*:role/standards-review-*",
-          "arn:aws:lambda:*:*:function/standards-review-*",
-          "arn:aws:apigateway:*:*:*/standards-review-*",
-          "arn:aws:sns:*:*:standards-review-*"
+          "arn:aws:s3:::poc-standards-review-terraform-state*",
+          "arn:aws:s3:::poc-standards-review-pdf-source*",
+          "arn:aws:s3:::poc-standards-review-text-destination*",
+          "arn:aws:dynamodb:*:*:table/poc-standards-review-terraform-locks",
+          "arn:aws:iam::*:role/poc-standards-review-*",
+          "arn:aws:lambda:*:*:function/poc-standards-review-*",
+          "arn:aws:apigateway:*:*:*/poc-standards-review-*",
+          "arn:aws:sns:*:*:poc-standards-review-*"
         ]
       },
       {

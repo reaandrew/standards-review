@@ -1,0 +1,10 @@
+{
+  "name": "opensearch-lambda",
+  "version": "1.0.0",
+  "description": "Lambda function to insert embeddings into OpenSearch for KNN semantic searches",
+  "main": "index.js",
+  "dependencies": {
+    "aws-sdk": "^2.1502.0",
+    "@opensearch-project/opensearch": "^1.2.0"
+  }
+}
