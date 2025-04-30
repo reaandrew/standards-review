@@ -397,7 +397,7 @@ resource "aws_lambda_function" "chunking_lambda" {
   handler       = "index.handler"
   runtime       = "nodejs18.x"
   timeout       = 60  # Allow up to 1 minute for processing large files
-  memory_size   = 256 # Allocate more memory for text processing
+  memory_size   = 512 # Increased memory for text processing
   role          = aws_iam_role.chunking_lambda_role.arn
   
   environment {

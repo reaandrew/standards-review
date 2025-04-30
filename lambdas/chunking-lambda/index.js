@@ -132,60 +132,58 @@ function findPagesForChunk(chunkStart, chunkEnd, pageRanges) {
  * @param {Object} metadata - Document metadata
  * @returns {Array} - Array of chunk objects
  */
-function chunkText(text, metadata = {}, chunkSize = 1000, chunkOverlap = 200) {
+function chunkText(text, metadata = {}, chunkSize = 1000, chunkOverlap = 50) {
   console.log(`Chunking text of length ${text.length} characters`);
   
   // Parse out page info
   const { cleanedText, pageMap } = parsePageInfo(text);
   const pageRanges = buildPageRanges(cleanedText, pageMap);
   
-  // Define hierarchy of separators for natural breaks
-  const separators = ['\n\n', '\n', '. ', ' ', ''];
+  // Define hierarchy of separators for natural breaks (in order of preference)
+  const separators = ['\n\n', '\n', '. ', ' '];
   
-  // Initialize result array and chunk tracking
+  // Initialize result array
   const chunks = [];
-  let chunk = '';
   let currentPosition = 0;
   
-  // Process the text character by character with better natural breakpoints
+  // Optimize memory usage by avoiding large string operations
+  // Process the text in smaller windows
   while (currentPosition < cleanedText.length) {
-    // Calculate the end position for this chunk
+    // Get a window of text to process
     const endPosition = Math.min(currentPosition + chunkSize, cleanedText.length);
+    let currentChunk = cleanedText.substring(currentPosition, endPosition);
+    let chunkEndPos = currentChunk.length;
     
-    // Start by getting the chunk up to the specified size
-    chunk = cleanedText.substring(currentPosition, endPosition);
-    
-    // If we're not at the end of the text, find a natural breakpoint
+    // If not at the end of text, find a natural breakpoint
     if (endPosition < cleanedText.length) {
-      // Try each separator in order of preference
       let foundBreakpoint = false;
       
+      // Try each separator in order of preference
       for (const separator of separators) {
-        if (separator === '') continue; // Skip empty separator in this phase
+        const lastIndex = currentChunk.lastIndexOf(separator);
         
-        // Find the last occurrence of the separator in the chunk
-        const lastIndex = chunk.lastIndexOf(separator);
-        
-        if (lastIndex !== -1 && lastIndex > chunkSize / 2) { // Ensure we don't create tiny chunks
-          // Cut the chunk at this breakpoint
-          chunk = chunk.substring(0, lastIndex + separator.length);
+        // Make sure we have a meaningful chunk size (at least half the target)
+        if (lastIndex > chunkSize / 2) {
+          chunkEndPos = lastIndex + separator.length;
           foundBreakpoint = true;
           break;
         }
       }
       
-      // If no good breakpoint was found, just use the original end
-      if (!foundBreakpoint && endPosition - currentPosition > chunkSize / 2) {
-        // Find a word boundary if possible
-        const lastSpaceIndex = chunk.lastIndexOf(' ');
-        if (lastSpaceIndex !== -1 && lastSpaceIndex > chunkSize / 2) {
-          chunk = chunk.substring(0, lastSpaceIndex + 1);
+      // If no good separator found and we're past minimum size, break at a word boundary
+      if (!foundBreakpoint && currentChunk.length > chunkSize / 2) {
+        const lastSpaceIndex = currentChunk.lastIndexOf(' ', chunkSize);
+        if (lastSpaceIndex > chunkSize / 2) {
+          chunkEndPos = lastSpaceIndex + 1;
         }
       }
     }
     
-    // Find which pages this chunk comes from
-    const chunkEndPosition = currentPosition + chunk.length;
+    // Get the final chunk text
+    const finalChunk = currentChunk.substring(0, chunkEndPos);
+    
+    // Find which pages this chunk covers
+    const chunkEndPosition = currentPosition + finalChunk.length;
     const chunkPages = findPagesForChunk(currentPosition, chunkEndPosition, pageRanges);
     
     // Format page range display
@@ -193,32 +191,41 @@ function chunkText(text, metadata = {}, chunkSize = 1000, chunkOverlap = 200) {
     const endPage = chunkPages[chunkPages.length - 1];
     const pageNumberDisplay = startPage === endPage ? `${startPage}` : `${startPage}-${endPage}`;
     
-    // Add chunk to results
-    chunks.push({
-      text: chunk,
-      pages: chunkPages,
+    // Create a lean metadata object
+    const chunkMetadata = {
+      sourceKey: metadata.sourceKey || '',
+      sourceFile: metadata.sourceFile || '',
       pageNumber: pageNumberDisplay,
       startPage,
       endPage,
-      documentName: metadata.sourceKey || '',
-      metadata: {
-        ...metadata,
-        pages: chunkPages,
-        pageNumber: pageNumberDisplay,
-        startPage,
-        endPage
-      }
+      pages: chunkPages,
+      documentType: metadata.documentType || 'unknown',
+      documentTitle: metadata.documentTitle || '',
+      categories: metadata.categories || [],
+      audience: metadata.audience || '',
+      entities: metadata.entities || [],
+      estimatedDate: metadata.estimatedDate || '',
+      topicTags: metadata.topicTags || []
+    };
+    
+    // Add chunk to results (with minimal duplication)
+    chunks.push({
+      text: finalChunk,
+      metadata: chunkMetadata
     });
     
     // Move position forward, accounting for overlap
-    currentPosition += chunk.length - chunkOverlap;
-    if (currentPosition <= 0) currentPosition = 1; // Ensure we make progress
+    currentPosition += finalChunk.length - chunkOverlap;
+    
+    // Ensure we make progress
+    if (currentPosition <= 0 || currentPosition === currentPosition + finalChunk.length) {
+      currentPosition += 1;
+    }
   }
   
-  // Assign chunk IDs and total count
+  // Add chunk IDs as a final step
   chunks.forEach((chunk, index) => {
-    chunk.chunkId = index;
-    chunk.totalChunks = chunks.length;
+    chunk.id = `chunk-${index}`;
     chunk.metadata.chunkId = index;
     chunk.metadata.totalChunks = chunks.length;
   });
@@ -640,10 +647,7 @@ Respond only with complete, valid JSON in the exact format below (do not include
 
 exports.handler = async (event) => {
   try {
-    // Debug: Log the entire event
-    console.log('Received event:', JSON.stringify(event, null, 2));
-    
-    // Debug environment variables
+    // Debug environment variables only
     console.log("ENV CHUNKS_BUCKET:", process.env.CHUNKS_BUCKET);
     console.log("ENV BEDROCK_MODEL_ID:", BEDROCK_MODEL_ID || 'not set');
 
@@ -691,32 +695,30 @@ exports.handler = async (event) => {
     
     console.log(`Saved document outline to s3://${CHUNKS_BUCKET}/${directoryPath}/metadata/${fileName.replace(/\.[^/.]+$/, '')}_outline.json`);
     
-    // Get metadata for the chunks
-    const fileMetadata = {
-      sourceBucket,
-      sourceKey,
-      sourceFile: fileName,
-      documentType: documentAnalysis.documentType,
-      documentTitle: documentAnalysis.title,
-      categories: documentAnalysis.categories || [],
-      audience: documentAnalysis.audience || "",
-      entities: documentAnalysis.entities || [],
-      estimatedDate: documentAnalysis.estimatedDate || "",
-      topicTags: documentAnalysis.topicTags || []
-    };
+    // PHASE 2: Chunking - Do basic chunking with minimal memory usage
     
-    // Split the text into chunks using our improved approach
-    const chunks = chunkText(textContent, fileMetadata, 1000, 50);
-    console.log(`Split text into ${chunks.length} chunks with improved algorithm`);
+    // Simple chunking to avoid memory issues
+    const simpleChunks = simpleChunkText(textContent);
+    console.log(`Split text into ${simpleChunks.length} chunks with simplified algorithm`);
     
-    // Format chunks and add final metadata
-    const chunksMetadata = chunks.map((chunk, index) => ({
+    // Basic metadata for each chunk
+    const chunksMetadata = simpleChunks.map((chunk, index) => ({
       id: `${sourceKey}-chunk-${index}`,
       text: chunk.text,
       metadata: {
-        ...chunk.metadata,
+        sourceBucket,
+        sourceKey,
+        sourceFile: fileName,
         chunkId: index,
-        totalChunks: chunks.length
+        totalChunks: simpleChunks.length,
+        pageInfo: chunk.pageInfo,
+        documentType: documentAnalysis.documentType,
+        documentTitle: documentAnalysis.title,
+        categories: documentAnalysis.categories || [],
+        audience: documentAnalysis.audience || "",
+        entities: documentAnalysis.entities || [],
+        estimatedDate: documentAnalysis.estimatedDate || "",
+        topicTags: documentAnalysis.topicTags || []
       }
     }));
     
@@ -737,7 +739,7 @@ exports.handler = async (event) => {
         size: textContent.length
       },
       chunking: {
-        totalChunks: chunks.length,
+        totalChunks: simpleChunks.length,
         chunkSize: 1000,
         chunkOverlap: 50
       },
@@ -756,14 +758,162 @@ exports.handler = async (event) => {
       ContentType: 'application/json'
     }).promise();
     
-    console.log(`Saved ${chunks.length} chunks with enhanced metadata to s3://${CHUNKS_BUCKET}/${directoryPath}/chunks/${fileName.replace(/\.[^/.]+$/, '')}.json`);
+    console.log(`Saved ${simpleChunks.length} chunks with basic metadata to s3://${CHUNKS_BUCKET}/${directoryPath}/chunks/${fileName.replace(/\.[^/.]+$/, '')}.json`);
     
     return {
       statusCode: 200,
-      body: `Processed ${sourceKey}, generated document outline, and created ${chunks.length} chunks with enhanced metadata`
+      body: `Processed ${sourceKey}, generated document outline, and created ${simpleChunks.length} chunks with basic metadata`
     };
   } catch (error) {
     console.error('Error:', error);
     throw error;
   }
 };
+
+/**
+ * Simple chunking function with minimal memory usage and page tracking
+ * @param {string} text Document text
+ * @returns {Array} Array of chunk objects with text and page info
+ */
+function simpleChunkText(text) {
+  // Extract page markers first
+  const pageMarkers = [];
+  const pagePattern = /===== PAGE (\d+) =====/g;
+  let pageMatch;
+  
+  while ((pageMatch = pagePattern.exec(text)) !== null) {
+    pageMarkers.push({
+      pageNumber: parseInt(pageMatch[1]),
+      position: pageMatch.index
+    });
+  }
+  
+  // Sort markers by position
+  pageMarkers.sort((a, b) => a.position - b.position);
+  
+  // Fast split by paragraphs (double newlines)
+  const paragraphs = text.split(/\n\s*\n/);
+  
+  // Initialize chunks
+  const chunks = [];
+  let currentChunk = '';
+  let currentPosition = 0;
+  const targetChunkSize = 1000;
+  const overlap = 50;
+  
+  for (const paragraph of paragraphs) {
+    // Skip empty paragraphs
+    if (!paragraph.trim()) continue;
+    
+    // If adding this paragraph would exceed target size, finalize current chunk
+    if (currentChunk && (currentChunk.length + paragraph.length > targetChunkSize)) {
+      // Find pages for this chunk
+      const chunkPages = findPageNumbersForPosition(currentPosition, currentPosition + currentChunk.length, text, pageMarkers);
+      
+      // Create page info string
+      const pageInfo = formatPageInfo(chunkPages);
+      
+      // Save chunk with page info
+      chunks.push({
+        text: currentChunk,
+        pageInfo: pageInfo
+      });
+      
+      // Start new chunk with small overlap (last sentence if possible)
+      const sentences = currentChunk.split(/(?<=[.!?])\s+/);
+      const overlapText = sentences.length > 0 ? sentences[sentences.length - 1] : '';
+      currentChunk = overlapText.length < overlap ? overlapText : '';
+      currentChunk += paragraph;
+      currentPosition += currentChunk.length - overlapText.length;
+    } else {
+      // Add to current chunk
+      currentChunk += (currentChunk ? '\n\n' : '') + paragraph;
+    }
+  }
+  
+  // Add final chunk if not empty
+  if (currentChunk.trim()) {
+    const chunkPages = findPageNumbersForPosition(currentPosition, currentPosition + currentChunk.length, text, pageMarkers);
+    const pageInfo = formatPageInfo(chunkPages);
+    
+    chunks.push({
+      text: currentChunk,
+      pageInfo: pageInfo
+    });
+  }
+  
+  return chunks;
+}
+
+/**
+ * Find page numbers for a chunk based on its position in the original text
+ * @param {number} startPos - Start position in text
+ * @param {number} endPos - End position in text
+ * @param {string} text - Original text
+ * @param {Array} pageMarkers - Array of page marker objects
+ * @returns {Array} - Array of page numbers
+ */
+function findPageNumbersForPosition(startPos, endPos, text, pageMarkers) {
+  const pages = [];
+  let currentPage = 1; // Default to page 1
+  
+  // Find all pages that overlap with this position range
+  for (let i = 0; i < pageMarkers.length; i++) {
+    const marker = pageMarkers[i];
+    
+    // If marker is before start position, update current page
+    if (marker.position <= startPos) {
+      currentPage = marker.pageNumber;
+    }
+    // If marker is between start and end, add this page
+    else if (marker.position > startPos && marker.position < endPos) {
+      if (!pages.includes(currentPage)) {
+        pages.push(currentPage);
+      }
+      currentPage = marker.pageNumber;
+      pages.push(currentPage);
+    }
+    // If marker is past end position, stop looking
+    else if (marker.position >= endPos) {
+      break;
+    }
+  }
+  
+  // Add the current page if not already included
+  if (!pages.includes(currentPage)) {
+    pages.push(currentPage);
+  }
+  
+  return pages;
+}
+
+/**
+ * Format page info string
+ * @param {Array} pages - Array of page numbers
+ * @returns {string} - Formatted page info
+ */
+function formatPageInfo(pages) {
+  if (!pages || pages.length === 0) {
+    return "Page 1";
+  }
+  
+  if (pages.length === 1) {
+    return `Page ${pages[0]}`;
+  }
+  
+  // Sort pages
+  pages.sort((a, b) => a - b);
+  
+  // Check if pages are consecutive
+  let isConsecutive = true;
+  for (let i = 1; i < pages.length; i++) {
+    if (pages[i] !== pages[i-1] + 1) {
+      isConsecutive = false;
+      break;
+    }
+  }
+  
+  return isConsecutive
+    ? `Pages ${pages[0]}-${pages[pages.length - 1]}`
+    : `Pages ${pages.join(', ')}`;
+}
