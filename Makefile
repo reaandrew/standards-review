@@ -52,6 +52,22 @@ package-lambda: clean-lambda
 deploy-app: package-lambda
 	cd $(APP_DIR) && terraform apply -auto-approve
 
+# Configure OpenSearch roles after deployment
+# Usage: make setup-opensearch-roles PASSWORD=<admin_password>
+setup-opensearch-roles:
+	@if [ -z "$(PASSWORD)" ]; then \
+		echo "ERROR: Admin password not provided"; \
+		echo "Usage: make setup-opensearch-roles PASSWORD=<admin_password>"; \
+		echo "Or set OS_PASSWORD environment variable"; \
+		exit 1; \
+	fi
+	cd $(APP_DIR) && ./setup-os-roles.sh "$(PASSWORD)"
+
+# Full deployment including OpenSearch role setup
+# Usage: make deploy-all PASSWORD=<admin_password>
+deploy-all: deploy
+	$(MAKE) setup-opensearch-roles
+
 # Main deployment targets
 deploy: deploy-initial deploy-ci deploy-app
 
