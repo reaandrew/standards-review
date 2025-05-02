@@ -12,9 +12,6 @@ terraform {
   }
 }
 
-# Get current AWS account ID
-data "aws_caller_identity" "current" {}
-
 # Source and destination S3 buckets
 resource "aws_s3_bucket" "pdf_source" {
   bucket = "poc-standards-review-pdf-source"
@@ -600,12 +597,8 @@ resource "aws_opensearch_domain" "semantic_search" {
   }
 
   advanced_security_options {
-    enabled                        = true
-    internal_user_database_enabled = true
-    master_user_options {
-      master_user_name     = "admin"
-      master_user_password = "StrongPasswordHere123!" # Should be stored in AWS Secrets Manager in production
-    }
+    enabled                        = false
+    internal_user_database_enabled = false
   }
 
   node_to_node_encryption {
@@ -627,14 +620,10 @@ resource "aws_opensearch_domain" "semantic_search" {
       {
         Effect    = "Allow"
         Principal = {
-          AWS = [
-            aws_iam_role.opensearch_lambda_role.arn,
-            aws_iam_role.search_lambda_role.arn,
-            "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/SuperDevRole" # This is the role for developers
-          ]
+          AWS = "*"
         }
         Action    = "es:*"
-        Resource  = "arn:aws:es:eu-west-2:${data.aws_caller_identity.current.account_id}:domain/poc-standards-review-search/*"
+        Resource  = "arn:aws:es:eu-west-2:*:domain/poc-standards-review-search/*"
       }
     ]
   })
