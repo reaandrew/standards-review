@@ -136,7 +136,7 @@ async function searchByTaxonomy(taxonomyId, params) {
         must: [
           {
             terms: {
-              "topicTags": taxonomyIds
+              "topicTags.keyword": taxonomyIds
             }
           }
         ]
@@ -147,7 +147,7 @@ async function searchByTaxonomy(taxonomyId, params) {
           // Look for exact match in topicTags array
           {
             terms: {
-              "topicTags": taxonomyIds
+              "topicTags.keyword": taxonomyIds
             }
           },
           // Also check categories which might contain the taxonomy description

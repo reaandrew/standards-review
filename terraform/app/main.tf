@@ -597,8 +597,12 @@ resource "aws_opensearch_domain" "semantic_search" {
   }
 
   advanced_security_options {
-    enabled                        = false
-    internal_user_database_enabled = false
+    enabled                        = true
+    internal_user_database_enabled = true
+    master_user_options {
+      master_user_name     = "admin"
+      master_user_password = "StrongPasswordHere123!"
+    }
   }
 
   node_to_node_encryption {
@@ -718,7 +722,9 @@ resource "aws_lambda_function" "opensearch_lambda" {
   
   environment {
     variables = {
-      OPENSEARCH_ENDPOINT = "https://${aws_opensearch_domain.semantic_search.endpoint}"
+      OPENSEARCH_ENDPOINT = "https://${aws_opensearch_domain.semantic_search.endpoint}",
+      OPENSEARCH_USERNAME = "admin",
+      OPENSEARCH_PASSWORD = "StrongPasswordHere123!"
     }
   }
 
@@ -832,6 +838,8 @@ resource "aws_lambda_function" "search_lambda" {
   environment {
     variables = {
       OPENSEARCH_ENDPOINT = "https://${aws_opensearch_domain.semantic_search.endpoint}",
+      OPENSEARCH_USERNAME = "admin",
+      OPENSEARCH_PASSWORD = "StrongPasswordHere123!",
       DEFAULT_INDEX = "_all",
       MAX_RESULTS = "50",
       MIN_SCORE = "0.1"
